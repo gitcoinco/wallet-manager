@@ -27,6 +27,7 @@ from django.utils.timezone import now
 
 import requests
 import sendgrid
+from dashboard.utils import getTransactionReceipt__, getTransactionCount__
 from feeswapper.models import CurrencyConversion
 from gas.utils import recommend_min_gas_price_to_confirm_in_time
 from sendgrid.helpers.mail import Content, Email, Mail
@@ -44,7 +45,7 @@ class Command(BaseCommand):
 
         help="Convert ERC-20 token balances in .env/FEE_ADDRESS to ETH where a Uniswap exchange is available"
 
-        network = ''   
+        network = ''
         web3 = ''
         factoryContract = ''
         tokenList = ''
@@ -52,7 +53,7 @@ class Command(BaseCommand):
         tokenABI = ''
         exchangeABI = ''
         sg = sendgrid.SendGridAPIClient(apikey=settings.SENDGRID_API_KEY)
-        
+
         def getTokenList(self):
                 """ Query the blockscout API for ERC-20 token balances.
 
@@ -68,10 +69,10 @@ class Command(BaseCommand):
                 # Check if API is functioning and returned any ERC-20 tokens associated with the FEE_ADDRESS and return null token list if not.
                 if not r.ok or r.json()['status'] != '1':
                         return {}
-                
+
                 for transaction in r.json()['result']:
                         if int(transaction['balance'])>0:
-                                address = transaction['contractAddress']                      
+                                address = transaction['contractAddress']
                                 exchangeAddress = self.factoryContract.functions.getExchange(self.web3.toChecksumAddress(address)).call()
                                 if exchangeAddress != '0x0000000000000000000000000000000000000000':
                                         # Only add token to list to ETH if Uniswap exchange exists
@@ -84,11 +85,11 @@ class Command(BaseCommand):
 
         def sell_token(self, exchangeAddress, tokenSymbol):
                 """Swap total balance of ERC-20 token associated with Uniswap exchange address to ETH.
-                
+
                 Args:
                         exchangeAddress (str): The address of the Uniswap exchange contract assocciated with the ERC-20 token to convert to ETH
-                        tokenSymbol (str): The symbol for the ERC-20 token to be converted to ETH. 
-                
+                        tokenSymbol (str): The symbol for the ERC-20 token to be converted to ETH.
+
                 Note: This currently only works with the BAT Uniswap exchange on Rinkeby Testnet
                 """
                 if (self.network == 'rinkeby'):
@@ -96,13 +97,13 @@ class Command(BaseCommand):
                 else:
                         chain = 1
 
-     
+
                 # Check for previous failed transactions in database
                 failure_count = CurrencyConversion.objects.filter(from_token_symbol=tokenSymbol).exclude(transaction_result='success').count()
                 if failure_count == 0:
 
                         exchangeContract = self.web3.eth.contract(address = exchangeAddress, abi = self.exchangeABI)
-                        tokenAddress = exchangeContract.functions.tokenAddress().call() 
+                        tokenAddress = exchangeContract.functions.tokenAddress().call()
                         # Follows Uniswap doc guidance on calculating conversion
                         tokenContract = self.web3.eth.contract(address = tokenAddress, abi = self.tokenABI)
                         walletBalance = tokenContract.functions.balanceOf(settings.FEE_ADDRESS).call()
@@ -111,14 +112,14 @@ class Command(BaseCommand):
                         numerator = walletBalance*outputReserve * (1-settings.UNISWAP_LIQUIDITY_FEE)*1000
                         denominator = inputReserve*1000 + walletBalance*(1-settings.UNISWAP_LIQUIDITY_FEE)*1000
                         outputAmount = numerator / denominator
-                        deadline = self.web3.eth.getBlock('latest')['timestamp'] + settings.UNISWAP_TRADE_DEADLINE
+                        deadline = getBlock__('latest')['timestamp'] + settings.UNISWAP_TRADE_DEADLINE
                         logger.info('Current token balance is : ' + str(self.web3.fromWei(walletBalance,'ether')))
                         logger.info('Amount of ETH to be bought is :' + str(self.web3.fromWei(outputAmount,'ether')))
                         logger.info('Exchange rate is : ' + str(outputAmount/walletBalance)+ ' ETH/token')
 
-                        # Call contract function to give exchange approval to spend ERC-20 token balance.  
+                        # Call contract function to give exchange approval to spend ERC-20 token balance.
                         # Required to have exchange perform ERC-20 token transactions on behalf of FEE_ADDRESS
-                        nonce = self.web3.eth.getTransactionCount(settings.FEE_ADDRESS)
+                        nonce = getTransactionCount__(settings.FEE_ADDRESS)
                         txn_dict = exchangeContract.functions.approve(settings.FEE_ADDRESS,self.web3.toWei(walletBalance,'wei')).buildTransaction({
                                 'chainId': chain,
                                 'gas': 300000,
@@ -128,15 +129,15 @@ class Command(BaseCommand):
                         logger.info(txn_dict)
                         signed_txn = self.web3.eth.account.signTransaction(txn_dict,private_key=settings.FEE_ADDRESS_PRIVATE_KEY)
                         result = self.web3.eth.sendRawTransaction(signed_txn.rawTransaction)
-                        tx_receipt = self.web3.eth.getTransactionReceipt(result)
+                        tx_receipt = getTransactionReceipt__(result)
                         count = 0
                         while tx_receipt is None and (count < 30):
                                 time.sleep(10)
-                                tx_receipt = self.web3.eth.getTransactionReceipt(result)
+                                tx_receipt = getTransactionReceipt__(result)
                         logger.info(str(tx_receipt))
 
                         # Submit token -> ETH exchange trade to Uniswap.  Transaction only works for BAT exchange on Rinkeby.
-                        nonce = self.web3.eth.getTransactionCount(settings.FEE_ADDRESS)
+                        nonce = getTransactionCount__(settings.FEE_ADDRESS)
                         txn_dict = exchangeContract.functions.tokenToEthSwapInput(self.web3.toWei(walletBalance,'wei'),self.web3.toWei(outputAmount*(1-settings.SLIPPAGE),'wei'),deadline=deadline).buildTransaction({
                                 'chainId': chain,
                                 'gas': 300000,
@@ -146,11 +147,11 @@ class Command(BaseCommand):
                         signed_txn = self.web3.eth.account.signTransaction(txn_dict,private_key=settings.FEE_ADDRESS_PRIVATE_KEY)
                         result = self.web3.eth.sendRawTransaction(signed_txn.rawTransaction)
 
-                        tx_receipt = self.web3.eth.getTransactionReceipt(result)
+                        tx_receipt = getTransactionReceipt__(result)
                         count = 0
                         while tx_receipt is None and (count < 30):
                                 time.sleep(10)
-                                tx_receipt = self.web3.eth.getTransactionReceipt(result)
+                                tx_receipt = getTransactionReceipt__(result)
 
                         logger.info(str(tx_receipt))
 
@@ -166,13 +167,13 @@ class Command(BaseCommand):
                 else:
                         return # this email always fails.. disabling it
                         # Email Gitcoin staff if token balance exists in wallet where previous attempt convert to ETH failed
-                        mail = Mail(Email('kevin@gitcoin.co'),'Token in Fee Wallet with previous failed fee conversion', Email(settings.CONTACT_EMAIL),Content('text/plain', tokenSymbol+' conversion to ETH failed previously so no conversion was attempted.'))                        
+                        mail = Mail(Email('kevin@gitcoin.co'),'Token in Fee Wallet with previous failed fee conversion', Email(settings.CONTACT_EMAIL),Content('text/plain', tokenSymbol+' conversion to ETH failed previously so no conversion was attempted.'))
                         response = self.sg.client.mail.send.post(request_body=mail.get())
-                        
+
 
         def handle(self, **options):
                 """ Execute main management command function.
-                
+
                 Returns:
                         tokenList: Dict containing all ERC-20 tokens held by the FEE_ADDRESS and their balances
 
@@ -180,14 +181,14 @@ class Command(BaseCommand):
                 if settings.DEBUG:
                         self.network = 'rinkeby'
                 else:
-                        self.network = 'mainnet' 
+                        self.network = 'mainnet'
 
                 # Setup web3 connectivity
-                self.web3 = Web3(Web3.HTTPProvider(settings.WEB3_HTTP_PROVIDER+'/v3/'+settings.INFURA_V3_PROJECT_ID))
-                
+                self.web3 = Web3(Web3.HTTPProvider(settings.WEB3_HTTP_PROVIDER+'/v3/'+settings.WEB3_INFURA_PROJECT_ID))
+
                 if (self.network == 'rinkeby'):
                         self.factoryAddress = '0xf5D915570BC477f9B8D6C0E980aA81757A3AaC36'
-                        self.web3.middleware_stack.inject(geth_poa_middleware, layer=0)
+                        self.web3.middleware_onion.inject(geth_poa_middleware, layer=0)
 
                 else:
                         self.factoryAddress = '0xc0a47dFe034B400B47bDaD5FecDa2621de6c4d95'
@@ -202,15 +203,15 @@ class Command(BaseCommand):
                         self.tokenABI = json.load(tokenABIfile)
                 with open("feeswapper/management/commands/exchangeABI.json","r") as exchangeABIfile:
                         self.exchangeABI = json.load(exchangeABIfile)
-                
-                
+
+
                 # Get all potential ERC-20 tokens that have associated Uniswap exchanges
                 self.tokenList = self.getTokenList()
                 # Loop through all tokens and swap to ETH
                 for address, details in self.tokenList.items():
                         logger.info(details['exchangeAddress'])
                         self.sell_token(details['exchangeAddress'],details['tokenSymbol'])
-                        
+
                 if self.network == 'rinkeby':
                         return json.dumps(self.tokenList)
                 else:

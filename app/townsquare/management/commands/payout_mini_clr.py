@@ -27,7 +27,7 @@ from django.utils import timezone
 
 from dashboard.abi import erc20_abi as abi
 from dashboard.models import Activity, Earning, Profile
-from dashboard.utils import get_tx_status, get_web3, has_tx_mined
+from dashboard.utils import get_tx_status, get_web3, has_tx_mined, getTransactionCount__
 from gas.utils import recommend_min_gas_price_to_confirm_in_time
 from townsquare.models import MatchRound
 from web3 import HTTPProvider, Web3
@@ -38,7 +38,7 @@ class Command(BaseCommand):
     help = 'creates payouts'
 
     def add_arguments(self, parser):
-        parser.add_argument('what', 
+        parser.add_argument('what',
             default='finalize',
             type=str,
             help="what do we do? (finalize, payout, announce)"
@@ -123,7 +123,7 @@ class Command(BaseCommand):
                 address = Web3.toChecksumAddress(address)
                 amount = int(amount_owed * 10**18)
                 tx = contract.functions.transfer(address, amount).buildTransaction({
-                    'nonce': w3.eth.getTransactionCount(from_address),
+                    'nonce': getTransactionCount__(from_address),
                     'gas': 100000,
                     'gasPrice': int(float(recommend_min_gas_price_to_confirm_in_time(1)) * 10**9 * 1.4)
                 })
@@ -186,7 +186,7 @@ class Command(BaseCommand):
 
                 print("paid ", ranking)
                 time.sleep(30)
-            
+
         # announce finalists (round must be finalized first)
         from_profile = Profile.objects.get(handle='gitcoinbot')
         if options['what'] == 'announce':

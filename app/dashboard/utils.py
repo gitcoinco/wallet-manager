@@ -43,7 +43,7 @@ from hexbytes import HexBytes
 from ipfshttpclient.exceptions import CommunicationError
 from pytz import UTC
 from web3 import HTTPProvider, Web3, WebsocketProvider
-from web3.exceptions import BadFunctionCallOutput
+from web3.exceptions import BadFunctionCallOutput, BlockNotFound, TransactionNotFound
 from web3.middleware import geth_poa_middleware
 
 from .notifications import maybe_market_to_slack
@@ -276,18 +276,18 @@ def get_web3(network, sockets=False):
     if network in ['mainnet', 'rinkeby', 'ropsten']:
         if sockets:
             if settings.INFURA_USE_V3:
-                provider = WebsocketProvider(f'wss://{network}.infura.io/ws/v3/{settings.INFURA_V3_PROJECT_ID}')
+                provider = WebsocketProvider(f'wss://{network}.infura.io/ws/v3/{settings.WEB3_INFURA_PROJECT_ID}')
             else:
                 provider = WebsocketProvider(f'wss://{network}.infura.io/ws')
         else:
             if settings.INFURA_USE_V3:
-                provider = HTTPProvider(f'https://{network}.infura.io/v3/{settings.INFURA_V3_PROJECT_ID}')
+                provider = HTTPProvider(f'https://{network}.infura.io/v3/{settings.WEB3_INFURA_PROJECT_ID}')
             else:
                 provider = HTTPProvider(f'https://{network}.infura.io')
 
         w3 = Web3(provider)
         if network == 'rinkeby':
-            w3.middleware_stack.inject(geth_poa_middleware, layer=0)
+            w3.middleware_onion.inject(geth_poa_middleware, layer=0)
         return w3
     elif network == 'localhost' or 'custom network':
         return Web3(Web3.HTTPProvider("http://testrpc:8545", request_kwargs={'timeout': 60}))
@@ -464,16 +464,12 @@ def web3_process_bounty(bounty_data):
 
 
 def has_tx_mined(txid, network):
-    web3 = get_web3(network)
-    try:
-        transaction = web3.eth.getTransaction(txid)
-        if not transaction:
-            return False
-        if not transaction.blockHash:
-            return False
-        return transaction.blockHash != HexBytes('0x0000000000000000000000000000000000000000000000000000000000000000')
-    except Exception:
+    transaction = getTransaction__(txid)
+    if not transaction:
         return False
+    if not transaction.blockHash:
+        return False
+    return transaction.blockHash != HexBytes('0x0000000000000000000000000000000000000000000000000000000000000000')
 
 
 def sync_payout(fulfillment):
@@ -789,7 +785,7 @@ def get_tx_status(txid, network, created_on):
         return 'success', None #overridden by admin
     try:
         web3 = get_web3(network)
-        tx = web3.eth.getTransactionReceipt(txid)
+        tx = getTransactionReceipt__(txid)
         if not tx:
             drop_dead_date = created_on + timezone.timedelta(days=DROPPED_DAYS)
             if timezone.now() > drop_dead_date:
@@ -862,7 +858,7 @@ def get_nonce(network, address, ignore_db=False):
     w3 = get_web3(network)
 
     # web3 RPC node: nonce
-    nonce_from_web3 = w3.eth.getTransactionCount(address)
+    nonce_from_web3 = getTransactionCount__(address)
     if ignore_db:
         return nonce_from_web3
 
@@ -1000,3 +996,41 @@ def get_url_first_indexes():
 
 def get_custom_avatars(profile):
     return CustomAvatar.objects.filter(profile=profile).order_by('-id')
+
+
+
+
+
+def getTransaction(txid):
+    """Returns a transaction"""
+    
+    try:
+        return web3.eth.getTransaction(txid)
+    except TransactionNotFound:
+        return None
+
+
+def getBlock(latest):
+    """Returns a last block"""
+
+    try:
+        return web3.eth.getBlock(latest)
+    except BlockNotFound:
+        return None
+
+def getTransactionCount(address):
+    try:
+        return w3.eth.getTransactionCount(address)
+    except TransactionNotFound:
+        return None
+
+def getTransactionReceipt(txid):
+    try:
+        return web3.eth.getTransactionReceipt(txid)
+    except TransactionNotFound:
+        return None
+
+
+
+
+

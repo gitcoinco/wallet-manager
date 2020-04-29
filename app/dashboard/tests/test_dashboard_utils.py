@@ -30,7 +30,7 @@ from dashboard.models import Bounty, Profile
 from dashboard.utils import (
     IPFSCantConnectException, apply_new_bounty_deadline, clean_bounty_url, create_user_action, get_bounty, get_ipfs,
     get_ordinal_repr, get_web3, getBountyContract, humanize_event_name, ipfs_cat_ipfsapi, re_market_bounty,
-    release_bounty_to_the_public,
+    release_bounty_to_the_public, getBlock, getTransactionCount, getTransactionReceipt
 )
 from pytz import UTC
 from test_plus.test import TestCase
@@ -51,7 +51,7 @@ class DashboardUtilsTest(TestCase):
             assert len(web3_provider.providers) == 1
             assert isinstance(web3_provider.providers[0], HTTPProvider)
             if settings.INFURA_USE_V3:
-                assert web3_provider.providers[0].endpoint_uri == f'https://{network}.infura.io/v3/{settings.INFURA_V3_PROJECT_ID}'
+                assert web3_provider.providers[0].endpoint_uri == f'https://{network}.infura.io/v3/{settings.WEB3_INFURA_PROJECT_ID}'
             else:
                 assert web3_provider.providers[0].endpoint_uri == f'https://{network}.infura.io'
 
@@ -297,3 +297,16 @@ class DashboardUtilsTest(TestCase):
         assert bounty.bounty_reserved_for_user is None
         assert bounty.reserved_for_user_from is None
         assert bounty.reserved_for_user_expiration is None
+
+    def test_getBlock_is_success():
+        assert getBlock('latest') is not None
+
+    def test_getBlock_is_BlockNotFound():
+        assert getBlock('') is None
+
+    def test_getTransactionReceit_is_success():
+        txid = '0x018396fe9f55e19a72b75ff68c8c8ffe89a314605bf71a3b91e9fee1f69013c7'
+        assert getTransactionReceipt(txid) is not None
+
+    def test_getTransactionReceit_is_TransactionNotFound():
+        assert getTransactionReceipt('') is None
