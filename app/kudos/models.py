@@ -649,10 +649,13 @@ class BulkTransferCoupon(SuperModel):
     sender_profile = models.ForeignKey(
         'dashboard.Profile', related_name='bulk_transfers', on_delete=models.CASCADE
     )
-
     sender_address = models.CharField(max_length=255, blank=True)
     sender_pk = models.CharField(max_length=255, blank=True)
     tag = models.CharField(max_length=255, blank=True)
+    associated_quest = models.ForeignKey(
+        'quests.Quest', blank=True, null=True, related_name='bulk_transfers', on_delete=models.CASCADE,
+        help_text="Associate a Quest to the Coupon so that we can track how/why it was rewarded"
+    )
     metadata = JSONField(default=dict, blank=True)
     make_paid_for_first_minutes = models.IntegerField(default=0)
 
